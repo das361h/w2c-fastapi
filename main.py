@@ -1,43 +1,26 @@
-from fastapi import FastAPI
-import sqlite3
-from typing import List, Dict
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from database import SessionLocal, engine
+import models, schemas, crud
 
+models.Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
-def get_db_connection():
-    conn = sqlite3.connect("w2c.db")
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-@app.get("/recipes")
-def get_all_recipes() -> List[Dict]:
-    conn = get_db_connection()
-    recipes = conn.execute("SELECT * FROM recipeTable").fetchall()
-    conn.close()
-    return [dict(row) for row in recipes]
+@app.get("/search/", response_model=list[schemas.RecipeBase])
+def search_recipes(ingredients: list[str], db: Session = Depends(get_db)):
+    recipes = crud.get_recipes_by_ingredients(db, ingredients)
+    return recipes
 
-@app.get("/recipes/{recipe_id}")
-def get_recipe(recipe_id: str) -> Dict:
-    conn = get_db_connection()
-    recipe = conn.execute("SELECT * FROM recipeTable WHERE id = ?", (recipe_id,)).fetchone()
-    conn.close()
-    if recipe:
-        return dict(recipe)
-    return {"error": "Recipe not found"}
-
-
-@app.get("/recipes/search_exact")
-def search_recipes_exact(ingredients: str):
-    allowed_ingredients = set([i.strip().lower() for i in ingredients.split(",")])
-
-    conn = get_db_connection()
-    recipes = conn.execute("SELECT * FROM recipeTable").fetchall()
-    conn.close()
-
-    matching_recipes = []
-    for row in recipes:
-        recipe_ingredients = set(i.strip().lower() for i in row["ingredient"].split(","))
-        if recipe_ingredients.issubset(allowed_ingredients):
-            matching_recipes.append(dict(row))
-
-    return matching_recipes
+@app.get("/recipe/{rid}", response_model=schemas.RecipeBase)
+def get_recipe(rid: str, db: Session = Depends(get_db)):
+    recipe = crud.get_recipe_by_id(db, rid)
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return recipe
